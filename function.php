@@ -40,30 +40,9 @@ function register_DropBox_plugin_settings()
 
 function dropbox_plugin_settings_page()
 {
-    $path = '1160358.png';
-    $path1 = 'http://localhost/testdemo/wordpress/wp-content/uploads/2023/01/instagram.png';
-    $fp = fopen($path1, 'rb');
-    $size = filesize($path1);
-    
-    $cheaders = array('Authorization: Bearer sl.BW29OVIfvp1anmR1dOudXcZumRC1lvU0kT9Qge2vQ022glA7Hq3yaAL5WjHWEqvTtDdYmEBY4IWXzQ8HcjrDOGe6VQIgjYDH3LMSg0ggyYAfrENkSJKSg0Agpj_YMrjryErKdcc',
-                      'Content-Type: application/octet-stream',
-                      'Dropbox-API-Arg: {"path":"/test/'.$path.'", "mode":"add"}');
-    
-    $ch = curl_init('https://content.dropboxapi.com/2/files/upload');
-    curl_setopt($ch, CURLOPT_HTTPHEADER, $cheaders);
-    curl_setopt($ch, CURLOPT_PUT, true);
-    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
-    curl_setopt($ch, CURLOPT_INFILE, $fp);
-    // curl_setopt($ch, CURLOPT_INFILESIZE, $size);
-    // curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    $response = curl_exec($ch);
-    
-    var_dump($response);
-    curl_close($ch);
-    // fclose($fp);
 ?>
     <div class="wrap">
-        <h1>Drop Box Setting</h1>
+        <h1>Drop Box API Setting</h1>
 
         <form method="post" action="options.php">
             <?php settings_fields('drop-box-settings-group'); ?>
@@ -80,7 +59,7 @@ function dropbox_plugin_settings_page()
                 </tr>
 
                 <tr valign="top">
-                    <th scope="row">App secret</th>
+                    <th scope="row">App Bearer Token</th>
                     <td><input type="text" name="dropbox-app-access-code" value="<?php echo esc_attr(get_option('dropbox-app-access-code')); ?>" /></td>
                 </tr>
             </table>
@@ -129,42 +108,132 @@ function dropBox_featured_image_metabox_callback($post)
         $content .= '<p class="hide-if-no-js"><a title="' . esc_attr__('Set DropBox Image', 'dropBox_featured_image') . '" href="javascript:;" id="upload_dropBox_image_button" id="set-listing-image" data-uploader_title="' . esc_attr__('Choose an image', 'dropBox_featured_image') . '" data-uploader_button_text="' . esc_attr__('Set DropBox Image', 'dropBox_featured_image') . '">' . esc_html__('Set DropBox Image', 'dropBox_featured_image') . '</a></p>';
         $content .= '<input type="hidden" id="upload_dropBox_image" name="_dropBox_featured_image" value="" />';
     }
-    
+
     $content .= '
-        <input type="Checkbox" '.checked( $show_image, 'true' ).' id="dropBox_show_featured_image" name="_dropBox_show_featured_image" value="true" /> Show DropBox featured image
+        <input type="Checkbox" ' . checked($show_image, true, false) . ' id="dropBox_show_featured_image" name="_dropBox_show_featured_image" value="true" /> Show DropBox featured image
     ';
     echo $content;
 }
 
-add_action('save_post', 'listing_image_save', 10, 1);
-function listing_image_save($post_id)
+add_action('save_post', 'dropBox_featured_image_save', 10, 1);
+function dropBox_featured_image_save($post_id)
 {
     if (isset($_POST['_dropBox_featured_image'])) {
         $image_id = (int) $_POST['_dropBox_featured_image'];
+        $auth_token = get_option('dropbox-app-access-code');
+        $uploaded_data = upload_image_in_dropBox($auth_token, $image_id);
+        if( isset($uploaded_data['path_display']) && !empty($uploaded_data['path_display']) && !is_array($uploaded_data['path_display']) ) {
+            update_post_meta($post_id, 'dropBox_featured_image_path', $uploaded_data['path_display']);
+            $image_shared_link_data = create_shared_link_dropBox($auth_token, $uploaded_data['path_display']);
+            if( isset($image_shared_link_data['url']) && !empty($image_shared_link_data['url']) && !is_array($image_shared_link_data['url']) ) {
+                // print_r($image_shared_link_data['url']);
+                update_post_meta($post_id, 'dropBox_featured_shared_link', $image_shared_link_data['url']);
+            }
+        }
         update_post_meta($post_id, 'dropBox_featured_image', $image_id);
     }
 
     if (isset($_POST['_dropBox_show_featured_image'])) {
         $show_image = (string) $_POST['_dropBox_show_featured_image'];
         update_post_meta($post_id, 'dropBox_show_featured_image', $show_image);
-    }else{
+    } else {
         update_post_meta($post_id, 'dropBox_show_featured_image', false);
     }
 }
 
-add_filter( 'post_thumbnail_html', 'change_featured_image' );
+add_filter('post_thumbnail_html', 'change_featured_image');
 function change_featured_image($html)
 {
     global $wpdb, $post;
     $show_image = get_post_meta($post->ID, 'dropBox_show_featured_image', true);
-    $opt = get_option('s3dcs_status');//My value in `wp_options`
-    if(!$show_image){
+    if (!$show_image) {
         return $html;
-    } 
+    }
     $pattern = '~(http.*\.)(jpe?g|png|[tg]iff?|svg)~i';
-    $m = preg_match_all($pattern,$html,$matches);
+    $m = preg_match_all($pattern, $html, $matches);
     $il = $matches[0][0];
-    $tail = explode("wp-content", $il)[1];
-    $s3dcs_remote_link = 'https://www.shutterstock.com/image-photo/word-demo-appearing-behind-torn-260nw-1782295403.jpg';
-    return str_replace($il, $s3dcs_remote_link, $html) ;
+    $image_id = get_post_meta($post->ID, 'dropBox_featured_image', true);
+    $image_url = wp_get_attachment_image_url($image_id);
+
+    return str_replace($il, $image_url, $html);
 }
+
+function upload_image_in_dropBox($auth_token, $attachment_id)
+{
+    $path = get_attached_file($attachment_id);
+    $file_name = basename($path);
+    $fp = fopen($path, 'rb');
+    $size = filesize($path);
+    $cheaders = array(
+        'Authorization: Bearer '.$auth_token,
+        'Content-Type: application/octet-stream',
+        'Dropbox-API-Arg: {"path":"/test/' . $file_name . '", "mode":"add"}'
+    );
+    $ch = curl_init('https://content.dropboxapi.com/2/files/upload');
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $cheaders);
+    curl_setopt($ch, CURLOPT_PUT, true);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
+    curl_setopt($ch, CURLOPT_INFILE, $fp);
+    curl_setopt($ch, CURLOPT_INFILESIZE, $size);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    $response = curl_exec($ch);
+    curl_close($ch);
+    return json_decode($response, true);
+}
+
+
+function create_shared_link_dropBox($auth_token, $path)
+{
+    $ch = curl_init();
+
+    curl_setopt($ch, CURLOPT_URL, 'https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_POST, 1);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, '{"path":"'.$path.'","settings":{"access":"viewer","allow_download":true,"audience":"public","requested_visibility":"public"}}');
+
+    $headers = array();
+    $headers[] = 'Authorization: Bearer '.$auth_token;
+    $headers[] = 'Content-Type: application/json';
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+    $result = curl_exec($ch);
+    if (curl_errno($ch)) {
+        echo 'Error:' . curl_error($ch);
+    }
+    curl_close($ch);
+    return json_decode($result, true);
+}
+
+function get_image_url_dropBox($path, $share_url)
+{
+    $ch = curl_init();
+
+    curl_setopt($ch, CURLOPT_URL, 'https://content.dropboxapi.com/2/files/get_thumbnail_v2');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_POST, 1);
+
+    $headers = array();
+    $headers[] = 'Authorization: Bearer sl.BW02ImaSmy-AjbfdM3vCoRpd9R15AQa3Frh1z0a4NmW4SXDP308OWcV9Jte5fjPewi_z_Tgu1UxQj7tAA5cgPPETALdscmH5gwaqjkNyQO7SJo6YOSNtPm_UpZbM-JuQ9AK56pW-QBSQ';
+    $headers[] = 'Dropbox-Api-Arg: {"resource":{".tag":"link","path":"'.$path.'","url":"'.$share_url.'"}}';
+    $headers[] = 'Content-Type: text/plain';
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+    $result = curl_exec($ch);
+    if (curl_errno($ch)) {
+        echo 'Error:' . curl_error($ch);
+    }
+    curl_close($ch);
+    var_dump($result);
+}
+// $uploaded_data = upload_image_in_dropBox($image_id);
+// if( isset($uploaded_data['path_display']) && !empty($uploaded_data['path_display']) && !is_array($uploaded_data['path_display']) ) {
+//     $image_shared_link_data = create_shared_link_dropBox($uploaded_data['path_display']);
+//     if( isset($image_shared_link_data['url']) && !empty($image_shared_link_data['url']) && !is_array($image_shared_link_data['url']) ) {
+//         print_r($image_shared_link_data['url']);
+//     }
+// }
+    // echo "<pre>";
+    // print_r(get_image_url_dropBox('/test/fb-developer.png', 'https://www.dropbox.com/s/1o6ulj8hr81vjzl/fb-developer.png?dl=0'));
+    // echo "</pre>";
+
+    // die();
