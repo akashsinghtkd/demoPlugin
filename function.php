@@ -40,6 +40,27 @@ function register_DropBox_plugin_settings()
 
 function dropbox_plugin_settings_page()
 {
+    $path = '1160358.png';
+    $path1 = 'http://localhost/testdemo/wordpress/wp-content/uploads/2023/01/instagram.png';
+    $fp = fopen($path1, 'rb');
+    $size = filesize($path1);
+    
+    $cheaders = array('Authorization: Bearer sl.BW29OVIfvp1anmR1dOudXcZumRC1lvU0kT9Qge2vQ022glA7Hq3yaAL5WjHWEqvTtDdYmEBY4IWXzQ8HcjrDOGe6VQIgjYDH3LMSg0ggyYAfrENkSJKSg0Agpj_YMrjryErKdcc',
+                      'Content-Type: application/octet-stream',
+                      'Dropbox-API-Arg: {"path":"/test/'.$path.'", "mode":"add"}');
+    
+    $ch = curl_init('https://content.dropboxapi.com/2/files/upload');
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $cheaders);
+    curl_setopt($ch, CURLOPT_PUT, true);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
+    curl_setopt($ch, CURLOPT_INFILE, $fp);
+    // curl_setopt($ch, CURLOPT_INFILESIZE, $size);
+    // curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    $response = curl_exec($ch);
+    
+    var_dump($response);
+    curl_close($ch);
+    // fclose($fp);
 ?>
     <div class="wrap">
         <h1>Drop Box Setting</h1>
@@ -131,30 +152,19 @@ function listing_image_save($post_id)
     }
 }
 
-
-// apply_filters( 'wp_get_attachment_image_src', array|false $image, int $attachment_id, string|int[] $size, bool $icon )
-// add_filter( 'wp_get_attachment_image_src', 'dropBox_wp_get_attachment_image_src_fn', 99, 4 );
-// function dropBox_wp_get_attachment_image_src_fn( $image, $attachment_id, $size, $icon ) {
-//     if ( !is_admin() ) {
-//         print_r('sdg');
-//         die();
-//     }
-//     print_r($image);
-//     return $image;
-// }
-
 add_filter( 'post_thumbnail_html', 'change_featured_image' );
-function change_featured_image($attr)
+function change_featured_image($html)
 {
-    global $wpdb;
+    global $wpdb, $post;
+    $show_image = get_post_meta($post->ID, 'dropBox_show_featured_image', true);
     $opt = get_option('s3dcs_status');//My value in `wp_options`
-    if(empty($opt)){
-        return $attr;
+    if(!$show_image){
+        return $html;
     } 
     $pattern = '~(http.*\.)(jpe?g|png|[tg]iff?|svg)~i';
-    $m = preg_match_all($pattern,$attr,$matches);
+    $m = preg_match_all($pattern,$html,$matches);
     $il = $matches[0][0];
     $tail = explode("wp-content", $il)[1];
     $s3dcs_remote_link = 'https://www.shutterstock.com/image-photo/word-demo-appearing-behind-torn-260nw-1782295403.jpg';
-    return str_replace($il, $s3dcs_remote_link, $attr) ;
+    return str_replace($il, $s3dcs_remote_link, $html) ;
 }
